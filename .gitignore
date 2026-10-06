@@ -1,4 +1,5 @@
 .github/modernize/
+/target/
 .vscodetarget/
 .idea/
 *.iml

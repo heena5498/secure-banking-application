@@ -1,7 +1,0 @@
-com/securebank/common/PaginationTest.class
-com/securebank/common/MoneyTest.class
-com/securebank/common/PageResponseTest.class
-com/securebank/support/IntegrationTestBase.class
-com/securebank/account/AccountNumberGeneratorTest.class
-com/securebank/support/TestFixtures.class
-com/securebank/support/IntegrationTestBase$TestUser.class
