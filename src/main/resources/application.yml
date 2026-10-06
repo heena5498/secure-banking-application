@@ -1,0 +1,40 @@
+spring:
+  application:
+    name: secure-banking-application
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/securebank}
+    username: ${DB_USERNAME:securebank}
+    password: ${DB_PASSWORD:securebank}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: true
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+
+server:
+  error:
+    include-stacktrace: never
+    include-message: never
+    include-binding-errors: never
+    include-exception: false
+
+app:
+  security:
+    # Must be supplied via the JWT_SECRET environment variable (at least 32 characters).
+    bcrypt-strength: 12
+    jwt:
+      secret: ${JWT_SECRET}
+      expiration: ${JWT_EXPIRATION:PT15M}
+      issuer: secure-banking-application
+  # Optional: creates an ADMIN user on startup when both values are set.
+  bootstrap-admin:
+    email: ${ADMIN_EMAIL:}
+    password: ${ADMIN_PASSWORD:}

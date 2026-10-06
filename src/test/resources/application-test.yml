@@ -1,0 +1,14 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:securebank;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH;LOCK_TIMEOUT=10000;DB_CLOSE_DELAY=-1
+    username: sa
+    password:
+
+app:
+  security:
+    bcrypt-strength: 4
+    jwt:
+      secret: test-only-signing-secret-at-least-32-characters
+  bootstrap-admin:
+    email: admin@securebank.test
+    password: AdminPassword123

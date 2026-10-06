@@ -1,0 +1,6 @@
+.github/modernize/
+.vscodetarget/
+.idea/
+*.iml
+.vscode/
+.env
