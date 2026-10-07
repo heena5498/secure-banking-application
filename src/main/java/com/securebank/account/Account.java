@@ -43,8 +43,9 @@ public class Account {
     @Column(nullable = false, length = 20)
     private AccountStatus status;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "owner_id", nullable = false, updatable = false)
+    /** Null only for internal system accounts such as {@link AccountType#SYSTEM_CLEARING}. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "owner_id", updatable = false)
     private User owner;
 
     @Column(name = "created_at", nullable = false, updatable = false)
@@ -66,7 +67,7 @@ public class Account {
     }
 
     public boolean isOwnedBy(UUID userId) {
-        return owner.getId().equals(userId);
+        return owner != null && owner.getId().equals(userId);
     }
 
     public void ensureActive() {

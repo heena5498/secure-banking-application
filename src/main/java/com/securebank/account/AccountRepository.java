@@ -23,7 +23,12 @@ public interface AccountRepository extends JpaRepository<Account, UUID> {
     @Query("select a.owner.id from Account a where a.id = :id")
     Optional<UUID> findOwnerIdById(@Param("id") UUID id);
 
-    @Query("select a.id from Account a where a.accountNumber = :accountNumber")
+    /** Resolves a customer account by number; internal system accounts are never returned. */
+    @Query("""
+            select a.id from Account a
+            where a.accountNumber = :accountNumber
+              and a.type <> com.securebank.account.AccountType.SYSTEM_CLEARING
+            """)
     Optional<UUID> findIdByAccountNumber(@Param("accountNumber") String accountNumber);
 
     List<Account> findByOwnerIdOrderByCreatedAtAsc(UUID ownerId);

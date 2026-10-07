@@ -6,6 +6,7 @@ import com.securebank.common.AccountAccessDeniedException;
 import com.securebank.common.AccountNotFoundException;
 import com.securebank.common.InvalidTransferException;
 import com.securebank.common.Money;
+import com.securebank.ledger.LedgerPostingService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -15,17 +16,22 @@ import java.util.UUID;
 /**
  * Performs balance-changing operations. Each public method runs in a single database transaction
  * and takes row-level write locks on every account it modifies, so concurrent operations on the
- * same account are serialized and a failure at any step rolls back every change.
+ * same account are serialized and a failure at any step rolls back every change. Every completed
+ * operation also writes a balanced pair of ledger entries in the same database transaction.
  */
 @Service
 public class LedgerService {
 
     private final AccountRepository accountRepository;
     private final TransactionRepository transactionRepository;
+    private final LedgerPostingService ledgerPostingService;
 
-    public LedgerService(AccountRepository accountRepository, TransactionRepository transactionRepository) {
+    public LedgerService(AccountRepository accountRepository,
+                         TransactionRepository transactionRepository,
+                         LedgerPostingService ledgerPostingService) {
         this.accountRepository = accountRepository;
         this.transactionRepository = transactionRepository;
+        this.ledgerPostingService = ledgerPostingService;
     }
 
     @Transactional
@@ -36,7 +42,9 @@ public class LedgerService {
         Transaction transaction = Transaction.pending(TransactionType.DEPOSIT, amount, null, account, description);
         account.credit(amount);
         transaction.markCompleted();
-        return TransactionResponse.from(transactionRepository.save(transaction));
+        Transaction saved = transactionRepository.save(transaction);
+        ledgerPostingService.postDeposit(saved, account);
+        return TransactionResponse.from(saved);
     }
 
     @Transactional
@@ -47,7 +55,9 @@ public class LedgerService {
         Transaction transaction = Transaction.pending(TransactionType.WITHDRAWAL, amount, account, null, description);
         account.debit(amount);
         transaction.markCompleted();
-        return TransactionResponse.from(transactionRepository.save(transaction));
+        Transaction saved = transactionRepository.save(transaction);
+        ledgerPostingService.postWithdrawal(saved, account);
+        return TransactionResponse.from(saved);
     }
 
     @Transactional
@@ -86,7 +96,9 @@ public class LedgerService {
         source.debit(amount);
         destination.credit(amount);
         transaction.markCompleted();
-        return TransactionResponse.from(transactionRepository.save(transaction));
+        Transaction saved = transactionRepository.save(transaction);
+        ledgerPostingService.postTransfer(saved, source, destination);
+        return TransactionResponse.from(saved);
     }
 
     private Account lockOwnedAccount(UUID userId, UUID accountId) {

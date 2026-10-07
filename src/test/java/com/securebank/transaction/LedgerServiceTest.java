@@ -10,6 +10,7 @@ import com.securebank.common.ErrorCode;
 import com.securebank.common.InsufficientFundsException;
 import com.securebank.common.InvalidAmountException;
 import com.securebank.common.InvalidTransferException;
+import com.securebank.ledger.LedgerPostingService;
 import com.securebank.user.User;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
@@ -48,13 +49,16 @@ class LedgerServiceTest {
     @Mock
     private TransactionRepository transactionRepository;
 
+    @Mock
+    private LedgerPostingService ledgerPostingService;
+
     private LedgerService ledger;
     private User alice;
     private User bob;
 
     @BeforeEach
     void setUp() {
-        ledger = new LedgerService(accountRepository, transactionRepository);
+        ledger = new LedgerService(accountRepository, transactionRepository, ledgerPostingService);
         alice = user("Alice");
         bob = user("Bob");
         lenient().when(transactionRepository.save(any(Transaction.class))).thenAnswer(inv -> inv.getArgument(0));
@@ -87,7 +91,7 @@ class LedgerServiceTest {
         void rejectsInvalidAmountsBeforeTouchingAccounts(String amount) {
             assertThatThrownBy(() -> ledger.deposit(alice.getId(), UUID.randomUUID(), new BigDecimal(amount), null))
                     .isInstanceOf(InvalidAmountException.class);
-            verifyNoInteractions(accountRepository, transactionRepository);
+            verifyNoInteractions(accountRepository, transactionRepository, ledgerPostingService);
         }
 
         @ParameterizedTest

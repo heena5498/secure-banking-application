@@ -2,6 +2,8 @@ package com.securebank.account;
 
 import com.securebank.common.AccountAccessDeniedException;
 import com.securebank.common.AccountNotFoundException;
+import com.securebank.common.BankingException;
+import com.securebank.common.ErrorCode;
 import com.securebank.common.UserNotFoundException;
 import com.securebank.user.User;
 import com.securebank.user.UserRepository;
@@ -28,6 +30,9 @@ public class AccountService {
 
     @Transactional
     public AccountResponse createAccount(UUID userId, CreateAccountRequest request) {
+        if (!request.type().isCustomerType()) {
+            throw new BankingException(ErrorCode.VALIDATION_FAILED, "Account type must be CHECKING or SAVINGS");
+        }
         User owner = userRepository.findById(userId).orElseThrow(UserNotFoundException::new);
         Account account = new Account(accountNumberGenerator.next(), request.type(), owner);
         return AccountResponse.from(accountRepository.save(account));
