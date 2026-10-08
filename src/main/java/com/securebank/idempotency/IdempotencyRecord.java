@@ -1,5 +1,6 @@
 package com.securebank.idempotency;
 
+import com.securebank.common.Timestamps;
 import com.securebank.transaction.Transaction;
 import com.securebank.transaction.TransactionType;
 import com.securebank.user.User;
@@ -63,7 +64,7 @@ public class IdempotencyRecord {
         this.operationType = operationType;
         this.requestHash = requestHash;
         this.status = IdempotencyStatus.PENDING;
-        this.createdAt = Instant.now();
+        this.createdAt = Timestamps.now();
     }
 
     public static IdempotencyRecord claim(User user, IdempotentRequest request) {

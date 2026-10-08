@@ -1,6 +1,7 @@
 package com.securebank.transaction;
 
 import com.securebank.account.Account;
+import com.securebank.common.Timestamps;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -68,7 +69,7 @@ public class Transaction {
         this.destinationAccount = destinationAccount;
         this.description = description;
         this.status = status;
-        this.createdAt = Instant.now();
+        this.createdAt = Timestamps.now();
     }
 
     public static Transaction pending(TransactionType type, BigDecimal amount, Account source,

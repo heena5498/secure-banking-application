@@ -1,6 +1,7 @@
 package com.securebank.ledger;
 
 import com.securebank.account.Account;
+import com.securebank.common.Timestamps;
 import com.securebank.transaction.Transaction;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -58,7 +59,7 @@ public class LedgerEntry {
         this.account = account;
         this.entryType = entryType;
         this.amount = amount;
-        this.createdAt = Instant.now();
+        this.createdAt = Timestamps.now();
     }
 
     public static LedgerEntry debit(Transaction transaction, Account account, BigDecimal amount) {

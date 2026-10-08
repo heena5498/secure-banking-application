@@ -3,6 +3,7 @@ package com.securebank.account;
 import com.securebank.common.AccountNotActiveException;
 import com.securebank.common.ErrorCode;
 import com.securebank.common.InsufficientFundsException;
+import com.securebank.common.Timestamps;
 import com.securebank.user.User;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -63,7 +64,7 @@ public class Account {
         this.owner = owner;
         this.balance = BigDecimal.ZERO.setScale(2);
         this.status = AccountStatus.ACTIVE;
-        this.createdAt = Instant.now();
+        this.createdAt = Timestamps.now();
     }
 
     public boolean isOwnedBy(UUID userId) {

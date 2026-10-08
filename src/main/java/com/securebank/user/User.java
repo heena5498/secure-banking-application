@@ -1,6 +1,7 @@
 package com.securebank.user;
 
 import com.securebank.account.Account;
+import com.securebank.common.Timestamps;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -62,7 +63,7 @@ public class User {
         this.lastName = lastName;
         this.email = email;
         this.passwordHash = passwordHash;
-        this.createdAt = Instant.now();
+        this.createdAt = Timestamps.now();
     }
 
     public void addRole(Role role) {
