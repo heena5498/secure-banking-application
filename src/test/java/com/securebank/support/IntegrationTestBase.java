@@ -66,22 +66,49 @@ public abstract class IntegrationTestBase {
                 .andExpect(status().isCreated()));
     }
 
+    /** Sends a deposit with a fresh idempotency key. */
     protected ResultActions deposit(TestUser user, String accountId, String amount) throws Exception {
-        return perform(post("/api/accounts/{id}/deposit", accountId), user.token(),
-                Map.of("amount", new BigDecimal(amount)));
+        return deposit(user, accountId, amount, newIdempotencyKey());
     }
 
+    protected ResultActions deposit(TestUser user, String accountId, String amount, String idempotencyKey)
+            throws Exception {
+        return perform(withIdempotencyKey(post("/api/accounts/{id}/deposit", accountId), idempotencyKey),
+                user.token(), Map.of("amount", new BigDecimal(amount)));
+    }
+
+    /** Sends a withdrawal with a fresh idempotency key. */
     protected ResultActions withdraw(TestUser user, String accountId, String amount) throws Exception {
-        return perform(post("/api/accounts/{id}/withdraw", accountId), user.token(),
-                Map.of("amount", new BigDecimal(amount)));
+        return withdraw(user, accountId, amount, newIdempotencyKey());
+    }
+
+    protected ResultActions withdraw(TestUser user, String accountId, String amount, String idempotencyKey)
+            throws Exception {
+        return perform(withIdempotencyKey(post("/api/accounts/{id}/withdraw", accountId), idempotencyKey),
+                user.token(), Map.of("amount", new BigDecimal(amount)));
+    }
+
+    /** Sends a transfer with a fresh idempotency key. */
+    protected ResultActions transfer(TestUser user, String sourceAccountId, String destinationAccountNumber,
+                                     String amount) throws Exception {
+        return transfer(user, sourceAccountId, destinationAccountNumber, amount, newIdempotencyKey());
     }
 
     protected ResultActions transfer(TestUser user, String sourceAccountId, String destinationAccountNumber,
-                                     String amount) throws Exception {
-        return perform(post("/api/transfers"), user.token(), Map.of(
+                                     String amount, String idempotencyKey) throws Exception {
+        return perform(withIdempotencyKey(post("/api/transfers"), idempotencyKey), user.token(), Map.of(
                 "sourceAccountId", sourceAccountId,
                 "destinationAccountNumber", destinationAccountNumber,
                 "amount", new BigDecimal(amount)));
+    }
+
+    protected static String newIdempotencyKey() {
+        return UUID.randomUUID().toString();
+    }
+
+    private static MockHttpServletRequestBuilder withIdempotencyKey(MockHttpServletRequestBuilder request,
+                                                                    String idempotencyKey) {
+        return idempotencyKey == null ? request : request.header("Idempotency-Key", idempotencyKey);
     }
 
     protected ResultActions getAuthenticated(String path, String token, Object... uriVars) throws Exception {

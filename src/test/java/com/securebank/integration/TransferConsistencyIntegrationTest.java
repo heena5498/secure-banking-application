@@ -89,7 +89,8 @@ class TransferConsistencyIntegrationTest extends IntegrationTestBase {
         for (int i = 0; i < 10; i++) {
             withdrawals.add(() -> {
                 try {
-                    transactionService.withdraw(alice.id(), accountId, new AmountRequest(new BigDecimal("100"), null));
+                    transactionService.withdraw(alice.id(), accountId, newIdempotencyKey(),
+                            new AmountRequest(new BigDecimal("100"), null));
                     return true;
                 } catch (InsufficientFundsException ex) {
                     return false;
@@ -119,10 +120,10 @@ class TransferConsistencyIntegrationTest extends IntegrationTestBase {
             boolean fromAlice = i % 2 == 0;
             transfers.add(() -> {
                 if (fromAlice) {
-                    transactionService.transfer(alice.id(), new TransferRequest(aliceAccountId,
+                    transactionService.transfer(alice.id(), newIdempotencyKey(), new TransferRequest(aliceAccountId,
                             bobAccount.get("accountNumber").asText(), new BigDecimal("15.00"), null));
                 } else {
-                    transactionService.transfer(bob.id(), new TransferRequest(bobAccountId,
+                    transactionService.transfer(bob.id(), newIdempotencyKey(), new TransferRequest(bobAccountId,
                             aliceAccount.get("accountNumber").asText(), new BigDecimal("10.00"), null));
                 }
                 return true;

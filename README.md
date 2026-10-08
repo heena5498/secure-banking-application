@@ -1,6 +1,6 @@
 # Secure Banking Application
 
-This is a backend service for a small digital bank. It lets people create an account, sign in, open bank accounts, move money, and review their transactions. It is currently a Version 1 API, not a customer-facing web or mobile application.
+This is a backend service for a small digital bank. It lets people create an account, sign in, open bank accounts, move money, and review their transactions. It is currently an API (Version 2.2), not a customer-facing web or mobile application.
 
 ## What It Does
 
@@ -33,6 +33,9 @@ endpoints. Public registration never creates an administrator; it always creates
 - Deposits, withdrawals, and transfers are completed atomically: either the whole operation succeeds
   or no balance changes are kept.
 - Failed business operations such as insufficient funds are recorded with a reason when possible.
+- Every successful deposit, withdrawal, and transfer is also recorded in an internal double-entry
+  ledger, where each transaction's debits equal its credits.
+- Deposits, withdrawals, and transfers require an `Idempotency-Key` header, so a retried request never moves money twice. 
 - Accounts can be active, frozen, or closed. Version 1 enforces these states, but does not expose an
   API for freezing or closing accounts.
 - Passwords are stored using BCrypt, and the API uses stateless JWT bearer tokens rather than sessions.
@@ -45,7 +48,8 @@ endpoints. Public registration never creates an administrator; it always creates
 - Flyway database migrations
 - Maven
 
-The service stores users, roles, bank accounts, and transaction records in PostgreSQL. Hibernate checks the database schema, while Flyway creates and updates it.
+The service stores users, roles, bank accounts, transaction records, ledger entries, and
+idempotency records in PostgreSQL. Hibernate checks the database schema, while Flyway creates and updates it.
 
 ## Running
 
@@ -75,7 +79,8 @@ Tests use an in-memory H2 database in PostgreSQL mode, so no running database is
 
 ## API
 
-All endpoints except register/login need `Authorization: Bearer <accessToken>`.
+All endpoints except register/login need `Authorization: Bearer <accessToken>`. Endpoints marked
+**†** also require an `Idempotency-Key` header.
 
 | Method | Path | Role | Notes |
 |---|---|---|---|
@@ -85,11 +90,42 @@ All endpoints except register/login need `Authorization: Bearer <accessToken>`.
 | POST | `/api/accounts` | CUSTOMER | `{type: CHECKING\|SAVINGS}` → 201 |
 | GET | `/api/accounts` | CUSTOMER | Own accounts |
 | GET | `/api/accounts/{accountId}` | CUSTOMER | Owner only |
-| POST | `/api/accounts/{accountId}/deposit` | CUSTOMER | `{amount, description?}` |
-| POST | `/api/accounts/{accountId}/withdraw` | CUSTOMER | `{amount, description?}` |
-| POST | `/api/transfers` | CUSTOMER | `{sourceAccountId, destinationAccountNumber, amount, description?}` → 201 |
+| POST | `/api/accounts/{accountId}/deposit` **†** | CUSTOMER | `{amount, description?}` |
+| POST | `/api/accounts/{accountId}/withdraw` **†** | CUSTOMER | `{amount, description?}` |
+| POST | `/api/transfers` **†** | CUSTOMER | `{sourceAccountId, destinationAccountNumber, amount, description?}` → 201 |
 | GET | `/api/accounts/{accountId}/transactions?page=&size=` | CUSTOMER | Owner only, newest first |
 | GET | `/api/admin/users[/{id}]`, `/api/admin/accounts[/{id}]`, `/api/admin/accounts/{id}/transactions`, `/api/admin/transactions` | ADMIN | Read-only, paginated lists |
+
+### Idempotent requests
+
+Deposits, withdrawals, and transfers require an `Idempotency-Key` header. Idempotency keys prevent
+duplicate financial operations when clients retry requests because of network failures or timeouts:
+if a transfer succeeds but the response is lost, the client can safely send the identical request
+again and money still moves exactly once.
+
+- Generate a new key (a UUID is ideal) for each logical operation, and reuse the **same key** only
+  when retrying that operation. Keys are 1–100 characters of letters, digits, `-`, `_`, `.` or `:`,
+  and are scoped to the signed-in user.
+- A retry with the same key and the same request returns the **original result** (same transaction
+  `id`, same status code) without executing again.
+- Reusing a key for a **different** request (different amount, account, description, or operation)
+  returns `409 IDEMPOTENCY_CONFLICT`, and nothing executes.
+- A request that was **rejected** (for example insufficient funds or invalid amount) does not use up
+  its key; it can be retried with the same key and will be re-evaluated.
+- A missing key returns `400 IDEMPOTENCY_KEY_REQUIRED`; a malformed one returns
+  `400 IDEMPOTENCY_KEY_INVALID`.
+
+```bash
+curl -X POST http://localhost:8080/api/transfers \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: 550e8400-e29b-41d4-a716-446655440000" \
+  -d '{"sourceAccountId":"<your-account-id>","destinationAccountNumber":"123456789012","amount":250.00}'
+```
+
+Running the same command again returns the same transaction and leaves both balances unchanged.
+
+### Errors
 
 Errors use one JSON shape:
 
@@ -99,11 +135,11 @@ Errors use one JSON shape:
 
 | Status | Codes |
 |---|---|
-| 400 | `VALIDATION_FAILED`, `MALFORMED_REQUEST`, `INVALID_AMOUNT`, `INVALID_TRANSFER` |
+| 400 | `VALIDATION_FAILED`, `MALFORMED_REQUEST`, `INVALID_AMOUNT`, `INVALID_TRANSFER`, `IDEMPOTENCY_KEY_REQUIRED`, `IDEMPOTENCY_KEY_INVALID` |
 | 401 | `INVALID_CREDENTIALS`, `UNAUTHORIZED` |
 | 403 | `FORBIDDEN`, `ACCOUNT_ACCESS_DENIED` |
 | 404 | `USER_NOT_FOUND`, `ACCOUNT_NOT_FOUND`, `NOT_FOUND` |
-| 409 | `DUPLICATE_EMAIL`, `CONFLICT`, `CONCURRENT_MODIFICATION` |
+| 409 | `DUPLICATE_EMAIL`, `CONFLICT`, `CONCURRENT_MODIFICATION`, `IDEMPOTENCY_CONFLICT` |
 | 422 | `INSUFFICIENT_FUNDS`, `ACCOUNT_FROZEN`, `ACCOUNT_CLOSED` |
 
 ## Design notes
@@ -118,6 +154,19 @@ Errors use one JSON shape:
   and transfers set both. If a business rule rejects an operation on the caller's own account
   (insufficient funds, frozen or closed account), it is saved as `FAILED` with a reason, in a
   separate transaction after the rollback.
+- **Double-entry ledger.** Each successful operation writes a debit and a credit to `ledger_entries` in
+  the same database transaction as the balance change, and is checked to balance before commit.
+  Deposits debit an internal `SYSTEM_CLEARING` account and credit the customer; withdrawals do the
+  reverse; transfers debit the source and credit the destination. The clearing account has no owner
+  and is invisible to customer APIs; its position is derived from its ledger entries rather than
+  a stored balance. There is no ledger API, and entries are never updated or deleted.
+- **Idempotency.** Each financial request runs in one database transaction that first inserts an
+  `idempotency_records` row, then moves money, writes the transaction and ledger entries, and links
+  the transaction to the record. A `UNIQUE (user_id, idempotency_key)` constraint guarantees only one
+  request can claim a key: a simultaneous duplicate waits on PostgreSQL's unique index, fails once the
+  first commits, and then returns the first request's result. The stored `request_hash` is a SHA-256 of
+  the operation type and request parameters (amounts compared by value, so `250` equals `250.00`).
+  Keys do not expire yet.
 - **Ownership** always comes from the JWT subject (the user ID), never from request data. Transfers
   name the destination by account number, so customers never see other customers' internal account IDs.
 - Account status changes (freeze/close) have no API in V1; the rules for them are enforced and tested.

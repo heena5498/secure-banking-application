@@ -6,6 +6,8 @@ import com.securebank.common.AccountNotActiveException;
 import com.securebank.common.ErrorCode;
 import com.securebank.common.InsufficientFundsException;
 import com.securebank.common.InvalidAmountException;
+import com.securebank.idempotency.IdempotencyService;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -16,6 +18,7 @@ import org.springframework.data.domain.PageRequest;
 import java.math.BigDecimal;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -23,6 +26,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -43,18 +47,31 @@ class TransactionServiceTest {
     @Mock
     private TransactionRepository transactionRepository;
 
+    @Mock
+    private IdempotencyService idempotencyService;
+
     @InjectMocks
     private TransactionService transactionService;
 
+    private static final String KEY = "key-1";
+
     private final UUID userId = UUID.randomUUID();
     private final UUID accountId = UUID.randomUUID();
+
+    /** Idempotency is covered by its own tests; here every key is new and the operation runs once. */
+    @BeforeEach
+    void runOperationsDirectly() {
+        lenient().when(idempotencyService.findPreviousResult(any())).thenReturn(Optional.empty());
+        lenient().when(idempotencyService.execute(any(), any()))
+                .thenAnswer(inv -> inv.<Supplier<TransactionResponse>>getArgument(1).get());
+    }
 
     @Test
     void recordsFailedWithdrawalWhenFundsAreInsufficient() {
         when(ledgerService.withdraw(userId, accountId, new BigDecimal("100"), "atm"))
                 .thenThrow(new InsufficientFundsException());
 
-        assertThatThrownBy(() -> transactionService.withdraw(userId, accountId,
+        assertThatThrownBy(() -> transactionService.withdraw(userId, accountId, KEY,
                 new AmountRequest(new BigDecimal("100"), "  atm ")))
                 .isInstanceOf(InsufficientFundsException.class);
 
@@ -67,7 +84,8 @@ class TransactionServiceTest {
         when(ledgerService.deposit(userId, accountId, BigDecimal.TEN, null))
                 .thenThrow(new AccountNotActiveException(ErrorCode.ACCOUNT_FROZEN, "Account is frozen"));
 
-        assertThatThrownBy(() -> transactionService.deposit(userId, accountId, new AmountRequest(BigDecimal.TEN, "")))
+        assertThatThrownBy(() -> transactionService.deposit(userId, accountId, KEY,
+                new AmountRequest(BigDecimal.TEN, "")))
                 .isInstanceOf(AccountNotActiveException.class);
 
         verify(failedTransactionRecorder).record(TransactionType.DEPOSIT, new BigDecimal("10.00"), null, accountId,
@@ -82,7 +100,7 @@ class TransactionServiceTest {
                 .thenThrow(new InsufficientFundsException());
         when(accountRepository.findIdByAccountNumber("123456789012")).thenReturn(Optional.of(destinationId));
 
-        assertThatThrownBy(() -> transactionService.transfer(userId, request))
+        assertThatThrownBy(() -> transactionService.transfer(userId, KEY, request))
                 .isInstanceOf(InsufficientFundsException.class);
 
         verify(failedTransactionRecorder).record(TransactionType.TRANSFER, new BigDecimal("50.00"), accountId,
@@ -94,9 +112,11 @@ class TransactionServiceTest {
         when(ledgerService.withdraw(any(), any(), any(), any())).thenThrow(new AccountAccessDeniedException());
         when(ledgerService.deposit(any(), any(), any(), any())).thenThrow(new InvalidAmountException("bad"));
 
-        assertThatThrownBy(() -> transactionService.withdraw(userId, accountId, new AmountRequest(BigDecimal.ONE, null)))
+        assertThatThrownBy(() -> transactionService.withdraw(userId, accountId, KEY,
+                new AmountRequest(BigDecimal.ONE, null)))
                 .isInstanceOf(AccountAccessDeniedException.class);
-        assertThatThrownBy(() -> transactionService.deposit(userId, accountId, new AmountRequest(BigDecimal.ZERO, null)))
+        assertThatThrownBy(() -> transactionService.deposit(userId, accountId, KEY,
+                new AmountRequest(BigDecimal.ZERO, null)))
                 .isInstanceOf(InvalidAmountException.class);
 
         verifyNoInteractions(failedTransactionRecorder);
@@ -108,7 +128,7 @@ class TransactionServiceTest {
         doThrow(new IllegalStateException("db down")).when(failedTransactionRecorder)
                 .record(any(), any(), any(), isNull(), isNull(), anyString());
 
-        assertThatThrownBy(() -> transactionService.withdraw(userId, accountId,
+        assertThatThrownBy(() -> transactionService.withdraw(userId, accountId, KEY,
                 new AmountRequest(BigDecimal.ONE, null)))
                 .isInstanceOf(InsufficientFundsException.class);
     }
