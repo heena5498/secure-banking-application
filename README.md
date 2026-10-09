@@ -1,6 +1,6 @@
 # Secure Banking Application
 
-This is a backend service for a small digital bank. It lets people create an account, sign in, open bank accounts, move money, and review their transactions. It is currently an API (Version 2.2), not a customer-facing web or mobile application.
+This is a backend service for a small digital bank. It lets people create an account, sign in, open bank accounts, move money, and review their transactions. It is currently an API (Version 2.3), not a customer-facing web or mobile application.
 
 ## What It Does
 
@@ -75,7 +75,55 @@ The schema is managed by Flyway (`src/main/resources/db/migration`); Hibernate o
 mvn test
 ```
 
-Tests use an in-memory H2 database in PostgreSQL mode, so no running database is needed.
+This runs every test, including the PostgreSQL tests below, so **Docker must be running**. You don't
+need to start a database yourself. Without Docker, the PostgreSQL test classes fail at startup;
+they are never silently skipped.
+
+| Suite | Database | Location |
+|---|---|---|
+| Unit tests (Mockito) | none | `src/test/java/com/securebank/{account,auth,common,idempotency,ledger,transaction}` |
+| API and business-rule integration tests | in-memory H2 (PostgreSQL mode) | `src/test/java/com/securebank/integration` |
+| PostgreSQL integration and concurrency tests | PostgreSQL 16 via Testcontainers | `src/test/java/com/securebank/postgres` |
+
+To run only the PostgreSQL tests: `mvn test -Dtest='*PostgresTest'`.
+
+### PostgreSQL Integration & Concurrency Testing
+
+**Why PostgreSQL and not just H2.** The guarantees that matter most here come from the database:
+`SELECT … FOR UPDATE` row locks, unique-index behavior when two transactions insert the same key at
+once, deadlock detection, and constraint checks at commit. H2's PostgreSQL mode imitates the SQL but
+not these locking and transaction semantics. The `postgres` tests use Testcontainers to start a real
+PostgreSQL 16 container, apply the production Flyway migrations, and let Hibernate validate the
+schema. The container is shared by all PostgreSQL test classes and removed when the tests finish.
+
+**Making "concurrent" tests actually concurrent.** Starting two threads at once doesn't guarantee
+they overlap; they can still run one after another and pass by luck. The tests use a row-lock
+barrier: a separate connection locks the contested rows, the test waits until PostgreSQL's
+`pg_stat_activity` shows every request blocked on that lock, and then it releases the lock. This
+proves both requests were in progress at the same moment.
+
+**Scenarios covered**
+
+| Scenario | Expected result |
+|---|---|
+| Two simultaneous $800 withdrawals from $1,000 | Exactly one succeeds and one fails with insufficient funds; final balance $200 |
+| Alice → Bob $300 and Bob → Alice $200 at the same time | Both succeed with no deadlock; Alice $900, Bob $600, total still $1,500 |
+| 20 opposing transfers released together | All succeed; total money unchanged |
+| Two simultaneous transfers with the same `Idempotency-Key` | Money moves once; both callers get the same transaction; one completed idempotency record |
+| PostgreSQL rejects a ledger entry partway through a transfer (test-only `CHECK` constraint) | Balances, the transfer record, and partial ledger entries all roll back; the key can be retried |
+| Deposit, withdrawal, transfer | Correct ledger accounts and amounts for each |
+
+**Financial invariants verified** (shared helper `LedgerAssertions`, comparing money with `BigDecimal.compareTo`)
+
+- Balances never go negative, and no update is lost under concurrency.
+- Every completed transaction has ledger entries, and its debits equal its credits.
+- Deposits post clearing DEBIT / customer CREDIT; withdrawals post customer DEBIT / clearing CREDIT;
+  transfers post source DEBIT / destination CREDIT with no clearing entry.
+- Each account's ledger position (credits minus debits) equals its stored balance.
+- Failed or rolled-back operations leave no ledger entries.
+
+These tests show that the specific interleavings above behave correctly against real PostgreSQL.
+They don't prove that no race condition exists anywhere.
 
 ## API
 
